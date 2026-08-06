@@ -71,6 +71,59 @@ constexpr int kCoordParamLen = 20;
 constexpr char kCoordInputAttrs[] =
     " type=\"number\" step=\"0.000001\"";
 
+static const char* kPortalGeolocationScript = R"(<script>
+(function() {
+  function getInput(name) {
+    var el = document.getElementById(name);
+    if (!el) {
+      el = document.querySelector('input[name="' + name + '"]');
+    }
+    return el;
+  }
+
+  function isDefaultValue(value) {
+    if (value === null || value === undefined) {
+      return true;
+    }
+    var trimmed = String(value).trim();
+    return trimmed === '' || trimmed === '0' || trimmed === '0.000000';
+  }
+
+  function populateFromBrowser() {
+    if (!navigator.geolocation) {
+      return;
+    }
+
+    var latInput = getInput('radar_lat');
+    var lonInput = getInput('radar_lon');
+    if (!latInput || !lonInput) {
+      return;
+    }
+
+    if (!isDefaultValue(latInput.value) || !isDefaultValue(lonInput.value)) {
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(function(position) {
+      if (isDefaultValue(latInput.value)) {
+        latInput.value = position.coords.latitude.toFixed(6);
+      }
+      if (isDefaultValue(lonInput.value)) {
+        lonInput.value = position.coords.longitude.toFixed(6);
+      }
+    }, function(error) {
+      console.log('Geolocation unavailable:', error && error.message ? error.message : error);
+    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', populateFromBrowser);
+  } else {
+    populateFromBrowser();
+  }
+})();
+</script>)";
+
 WiFiManagerParameter s_param_lat("radar_lat", "Latitude (deg)", "0",
                                 kCoordParamLen, kCoordInputAttrs);
 WiFiManagerParameter s_param_lon("radar_lon", "Longitude (deg)", "0",
@@ -224,6 +277,7 @@ void ensureWifiManager() {
                            IPAddress(255, 255, 255, 0));
   s_wm.setHostname(config::kPortalHostname);
   s_wm.setAPCallback(onConfigPortalApStarted);
+  s_wm.setCustomHeadElement(kPortalGeolocationScript);
   attachPortalParams(s_wm);
   s_wm_configured = true;
 }
