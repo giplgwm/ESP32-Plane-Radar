@@ -106,6 +106,9 @@ char s_current_wifi_attrs[16] = " readonly";
 WiFiManagerParameter s_param_current_wifi("current_wifi", "Current Wi-Fi", "",
                                           64, s_current_wifi_attrs);
 
+void addSavedWifiNetwork(const String& ssid, const String& password, double lat,
+                         double lon, bool has_location);
+
 void loadSavedNetworks() {
   if (s_saved_wifi_networks_loaded) {
     return;
