@@ -60,6 +60,8 @@ constexpr char kPrefsForcePortalKey[] = "portal";
 constexpr char kPrefsSavedNetworkCountKey[] = "net_count";
 constexpr char kPrefsSavedNetworkSsidPrefix[] = "net_ssid_";
 constexpr char kPrefsSavedNetworkPassPrefix[] = "net_pass_";
+constexpr char kPrefsSavedNetworkLatPrefix[] = "net_lat_";
+constexpr char kPrefsSavedNetworkLonPrefix[] = "net_lon_";
 constexpr size_t kMaxSavedNetworks = 8;
 
 bool s_force_config_portal = false;
@@ -131,6 +133,9 @@ static const char* kPortalGeolocationScript = R"(<script>
 struct SavedWifiNetwork {
   String ssid;
   String password;
+  bool has_location;
+  double lat;
+  double lon;
 };
 
 SavedWifiNetwork s_saved_wifi_networks[kMaxSavedNetworks];
@@ -154,6 +159,9 @@ char s_current_wifi_attrs[16] = " readonly";
 WiFiManagerParameter s_param_current_wifi("current_wifi", "Current Wi-Fi", "",
                                           64, s_current_wifi_attrs);
 
+void addSavedWifiNetwork(const String& ssid, const String& password, double lat,
+                         double lon, bool has_location);
+
 void loadSavedNetworks() {
   if (s_saved_wifi_networks_loaded) {
     return;
@@ -170,13 +178,19 @@ void loadSavedNetworks() {
   for (uint8_t i = 0; i < count && s_saved_wifi_network_count < kMaxSavedNetworks; ++i) {
     const String ssid_key = String(kPrefsSavedNetworkSsidPrefix) + String(i);
     const String pass_key = String(kPrefsSavedNetworkPassPrefix) + String(i);
+    const String lat_key = String(kPrefsSavedNetworkLatPrefix) + String(i);
+    const String lon_key = String(kPrefsSavedNetworkLonPrefix) + String(i);
     const String ssid = prefs.getString(ssid_key.c_str(), "");
     const String pass = prefs.getString(pass_key.c_str(), "");
     if (ssid.length() == 0) {
       continue;
     }
-    s_saved_wifi_networks[s_saved_wifi_network_count].ssid = ssid;
-    s_saved_wifi_networks[s_saved_wifi_network_count].password = pass;
+    SavedWifiNetwork& network = s_saved_wifi_networks[s_saved_wifi_network_count];
+    network.ssid = ssid;
+    network.password = pass;
+    network.has_location = prefs.isKey(lat_key.c_str()) && prefs.isKey(lon_key.c_str());
+    network.lat = network.has_location ? prefs.getDouble(lat_key.c_str(), 0.0) : 0.0;
+    network.lon = network.has_location ? prefs.getDouble(lon_key.c_str(), 0.0) : 0.0;
     ++s_saved_wifi_network_count;
   }
 
@@ -195,20 +209,40 @@ void saveSavedNetworks() {
   for (size_t i = 0; i < s_saved_wifi_network_count; ++i) {
     const String ssid_key = String(kPrefsSavedNetworkSsidPrefix) + String(i);
     const String pass_key = String(kPrefsSavedNetworkPassPrefix) + String(i);
-    prefs.putString(ssid_key.c_str(), s_saved_wifi_networks[i].ssid.c_str());
-    prefs.putString(pass_key.c_str(), s_saved_wifi_networks[i].password.c_str());
+    const String lat_key = String(kPrefsSavedNetworkLatPrefix) + String(i);
+    const String lon_key = String(kPrefsSavedNetworkLonPrefix) + String(i);
+    const SavedWifiNetwork& network = s_saved_wifi_networks[i];
+    prefs.putString(ssid_key.c_str(), network.ssid.c_str());
+    prefs.putString(pass_key.c_str(), network.password.c_str());
+    if (network.has_location) {
+      prefs.putDouble(lat_key.c_str(), network.lat);
+      prefs.putDouble(lon_key.c_str(), network.lon);
+    } else {
+      prefs.remove(lat_key.c_str());
+      prefs.remove(lon_key.c_str());
+    }
   }
   for (size_t i = s_saved_wifi_network_count; i < kMaxSavedNetworks; ++i) {
     const String ssid_key = String(kPrefsSavedNetworkSsidPrefix) + String(i);
     const String pass_key = String(kPrefsSavedNetworkPassPrefix) + String(i);
+    const String lat_key = String(kPrefsSavedNetworkLatPrefix) + String(i);
+    const String lon_key = String(kPrefsSavedNetworkLonPrefix) + String(i);
     prefs.remove(ssid_key.c_str());
     prefs.remove(pass_key.c_str());
+    prefs.remove(lat_key.c_str());
+    prefs.remove(lon_key.c_str());
   }
 
   prefs.end();
 }
 
 void addSavedWifiNetwork(const String& ssid, const String& password) {
+  addSavedWifiNetwork(ssid, password, services::location::lat(),
+                      services::location::lon(), true);
+}
+
+void addSavedWifiNetwork(const String& ssid, const String& password, double lat,
+                         double lon, bool has_location) {
   if (ssid.length() == 0) {
     return;
   }
@@ -217,6 +251,9 @@ void addSavedWifiNetwork(const String& ssid, const String& password) {
   for (size_t i = 0; i < s_saved_wifi_network_count; ++i) {
     if (s_saved_wifi_networks[i].ssid.equalsIgnoreCase(ssid)) {
       s_saved_wifi_networks[i].password = password;
+      s_saved_wifi_networks[i].has_location = has_location;
+      s_saved_wifi_networks[i].lat = lat;
+      s_saved_wifi_networks[i].lon = lon;
       if (i > 0) {
         SavedWifiNetwork entry = s_saved_wifi_networks[i];
         for (size_t j = i; j > 0; --j) {
@@ -230,13 +267,14 @@ void addSavedWifiNetwork(const String& ssid, const String& password) {
   }
 
   if (s_saved_wifi_network_count < kMaxSavedNetworks) {
-    s_saved_wifi_networks[s_saved_wifi_network_count] = SavedWifiNetwork{ssid, password};
+    s_saved_wifi_networks[s_saved_wifi_network_count] =
+        SavedWifiNetwork{ssid, password, has_location, lat, lon};
     ++s_saved_wifi_network_count;
   } else {
     for (size_t i = kMaxSavedNetworks - 1; i > 0; --i) {
       s_saved_wifi_networks[i] = s_saved_wifi_networks[i - 1];
     }
-    s_saved_wifi_networks[0] = SavedWifiNetwork{ssid, password};
+    s_saved_wifi_networks[0] = SavedWifiNetwork{ssid, password, has_location, lat, lon};
   }
 
   saveSavedNetworks();
@@ -248,6 +286,9 @@ void clearSavedWifiNetworks() {
   for (size_t i = 0; i < kMaxSavedNetworks; ++i) {
     s_saved_wifi_networks[i].ssid = "";
     s_saved_wifi_networks[i].password = "";
+    s_saved_wifi_networks[i].has_location = false;
+    s_saved_wifi_networks[i].lat = 0.0;
+    s_saved_wifi_networks[i].lon = 0.0;
   }
 
   Preferences prefs;
@@ -258,8 +299,12 @@ void clearSavedWifiNetworks() {
   for (size_t i = 0; i < kMaxSavedNetworks; ++i) {
     const String ssid_key = String(kPrefsSavedNetworkSsidPrefix) + String(i);
     const String pass_key = String(kPrefsSavedNetworkPassPrefix) + String(i);
+    const String lat_key = String(kPrefsSavedNetworkLatPrefix) + String(i);
+    const String lon_key = String(kPrefsSavedNetworkLonPrefix) + String(i);
     prefs.remove(ssid_key.c_str());
     prefs.remove(pass_key.c_str());
+    prefs.remove(lat_key.c_str());
+    prefs.remove(lon_key.c_str());
   }
   prefs.end();
 }
@@ -292,7 +337,8 @@ void rememberCurrentWifiNetwork() {
   }
 
   const String password = WiFi.psk();
-  addSavedWifiNetwork(ssid, password);
+  addSavedWifiNetwork(ssid, password, services::location::lat(),
+                      services::location::lon(), true);
   Serial.printf("Saved Wi-Fi profile: %s\n", ssid.c_str());
 }
 
@@ -536,6 +582,9 @@ bool connectSavedNetwork(bool show_ui) {
       continue;
     }
     if (tryConnectWithUi(network.ssid, network.password, show_ui)) {
+      if (network.has_location) {
+        services::location::save(network.lat, network.lon);
+      }
       rememberCurrentWifiNetwork();
       return true;
     }
