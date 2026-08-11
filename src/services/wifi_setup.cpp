@@ -140,10 +140,15 @@ WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T"
 void refreshPortalParamDefaults() {
   char lat_buf[kCoordParamLen + 1];
   char lon_buf[kCoordParamLen + 1];
-  snprintf(lat_buf, sizeof(lat_buf), "%.6f", services::location::lat());
-  snprintf(lon_buf, sizeof(lon_buf), "%.6f", services::location::lon());
-  s_param_lat.setValue(lat_buf, kCoordParamLen);
-  s_param_lon.setValue(lon_buf, kCoordParamLen);
+  if (services::location::hasSavedLocation()) {
+    snprintf(lat_buf, sizeof(lat_buf), "%.6f", services::location::lat());
+    snprintf(lon_buf, sizeof(lon_buf), "%.6f", services::location::lon());
+    s_param_lat.setValue(lat_buf, kCoordParamLen);
+    s_param_lon.setValue(lon_buf, kCoordParamLen);
+  } else {
+    s_param_lat.setValue("", kCoordParamLen);
+    s_param_lon.setValue("", kCoordParamLen);
+  }
   snprintf(s_miles_checkbox_attrs, sizeof(s_miles_checkbox_attrs), "type=\"checkbox\"%s",
            ui::radar::useMiles() ? " checked" : "");
   s_param_miles.setValue("T", 2);
