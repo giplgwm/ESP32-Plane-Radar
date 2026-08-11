@@ -15,6 +15,9 @@ bool save(double lat, double lon);
 /** Parse portal strings, validate, persist to NVS, update runtime values. */
 bool saveFromStrings(const char* lat_str, const char* lon_str);
 
+/** Returns true when coordinates were loaded from NVS, not defaults. */
+bool hasSavedLocation();
+
 /** Clear stored coordinates (e.g. with WiFi credential reset). */
 void clear();
 

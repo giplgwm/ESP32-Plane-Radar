@@ -16,6 +16,7 @@ constexpr char kKeyLon[] = "lon";
 
 double s_lat = config::kDefaultRadarLat;
 double s_lon = config::kDefaultRadarLon;
+bool s_has_saved_location = false;
 
 bool parseCoord(const char* text, double* out) {
   if (text == nullptr || text[0] == '\0') {
@@ -42,6 +43,7 @@ void persist(double lat, double lon) {
   prefs.end();
   s_lat = lat;
   s_lon = lon;
+  s_has_saved_location = true;
 }
 
 }  // namespace
@@ -55,10 +57,13 @@ void init() {
     if (validLatLon(lat, lon)) {
       s_lat = lat;
       s_lon = lon;
+      s_has_saved_location = true;
     }
   }
   prefs.end();
 }
+
+bool hasSavedLocation() { return s_has_saved_location; }
 
 double lat() { return s_lat; }
 
@@ -90,6 +95,7 @@ void clear() {
   prefs.end();
   s_lat = config::kDefaultRadarLat;
   s_lon = config::kDefaultRadarLon;
+  s_has_saved_location = false;
 }
 
 }  // namespace services::location
