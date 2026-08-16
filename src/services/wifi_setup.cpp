@@ -201,6 +201,7 @@ WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T"
                                      s_runways_checkbox_attrs, WFM_LABEL_AFTER);
 
 char s_current_wifi_attrs[16] = " readonly";
+WiFiManagerParameter s_param_current_wifi_spacer("<div style=\"margin-top: 8px;\"></div>");
 WiFiManagerParameter s_param_current_wifi("current_wifi", "Current Wi-Fi", "",
                                           64, s_current_wifi_attrs);
 
@@ -424,6 +425,7 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
+  wm.addParameter(&s_param_current_wifi_spacer);
   wm.addParameter(&s_param_current_wifi);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
