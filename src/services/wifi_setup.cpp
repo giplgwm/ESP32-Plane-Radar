@@ -89,38 +89,84 @@ static const char* kPortalGeolocationScript = R"(<script>
     return trimmed === '' || trimmed === '0' || trimmed === '0.000000';
   }
 
-  function populateFromBrowser() {
-    if (!navigator.geolocation) {
-      return;
+  function showLocationStatus(message, isError) {
+    var statusId = 'plane-radar-location-status';
+    var status = document.getElementById(statusId);
+    if (!status) {
+      status = document.createElement('div');
+      status.id = statusId;
+      status.style.fontSize = '12px';
+      status.style.marginTop = '6px';
+      status.style.color = isError ? '#b00020' : '#1f7a1f';
+      status.style.lineHeight = '1.3';
+      var latInput = getInput('radar_lat');
+      if (latInput && latInput.parentElement) {
+        latInput.parentElement.appendChild(status);
+      }
     }
+    status.textContent = message;
+    status.style.color = isError ? '#b00020' : '#1f7a1f';
+  }
 
+  function attachUseLocationButton() {
     var latInput = getInput('radar_lat');
     var lonInput = getInput('radar_lon');
     if (!latInput || !lonInput) {
       return;
     }
 
-    if (!isDefaultValue(latInput.value) || !isDefaultValue(lonInput.value)) {
+    var buttonId = 'plane-radar-use-location';
+    if (document.getElementById(buttonId)) {
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(function(position) {
-      if (isDefaultValue(latInput.value)) {
-        latInput.value = position.coords.latitude.toFixed(6);
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.id = buttonId;
+    button.textContent = 'Use my location';
+    button.style.width = '100%';
+    button.style.margin = '8px 0';
+    button.style.padding = '6px 10px';
+    button.style.borderRadius = '6px';
+    button.style.cursor = 'pointer';
+
+    button.addEventListener('click', function() {
+      if (!navigator.geolocation) {
+        showLocationStatus('Geolocation is unavailable in this browser.', true);
+        return;
       }
-      if (isDefaultValue(lonInput.value)) {
-        lonInput.value = position.coords.longitude.toFixed(6);
-      }
-    }, function(error) {
-      console.log('Geolocation unavailable:', error && error.message ? error.message : error);
-    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+
+      navigator.geolocation.getCurrentPosition(function(position) {
+        if (isDefaultValue(latInput.value)) {
+          latInput.value = position.coords.latitude.toFixed(6);
+        }
+        if (isDefaultValue(lonInput.value)) {
+          lonInput.value = position.coords.longitude.toFixed(6);
+        }
+        showLocationStatus('Location filled from your browser.', false);
+      }, function(error) {
+        console.log('Geolocation unavailable:', error && error.message ? error.message : error);
+        showLocationStatus('Location permission blocked. Enter coordinates manually.', true);
+      }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+    });
+
+    var parent = latInput.parentElement || latInput.closest('div');
+    if (parent) {
+      parent.appendChild(button);
+    } else {
+      latInput.insertAdjacentElement('afterend', button);
+    }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', populateFromBrowser);
-  } else {
-    populateFromBrowser();
+  function init() {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', attachUseLocationButton);
+    } else {
+      attachUseLocationButton();
+    }
   }
+
+  init();
 })();
 </script>)";
 
