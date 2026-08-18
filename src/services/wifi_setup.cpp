@@ -62,10 +62,216 @@ bool s_force_config_portal = false;
 WiFiManager s_wm;
 bool s_wm_configured = false;
 
+constexpr size_t kMaxSavedWifiNetworks = 4;
+
+struct SavedWifiProfile {
+  String ssid;
+  String pass;
+  double lat = config::kDefaultRadarLat;
+  double lon = config::kDefaultRadarLon;
+  bool has_location = false;
+  uint32_t priority = 0;
+};
+
 void ensureWifiManager();
 void startLanWebPortal();
 void stopLanWebPortal();
 bool wifiLinkUp();
+
+String wifiProfileKey(size_t index, const char* suffix) {
+  char key[32];
+  snprintf(key, sizeof(key), "net%zu_%s", index, suffix);
+  return String(key);
+}
+
+void removeSavedWifiProfileKeys(Preferences& prefs) {
+  for (size_t index = 0; index < kMaxSavedWifiNetworks; ++index) {
+    prefs.remove(wifiProfileKey(index, "ssid").c_str());
+    prefs.remove(wifiProfileKey(index, "pass").c_str());
+    prefs.remove(wifiProfileKey(index, "lat").c_str());
+    prefs.remove(wifiProfileKey(index, "lon").c_str());
+    prefs.remove(wifiProfileKey(index, "has_loc").c_str());
+    prefs.remove(wifiProfileKey(index, "priority").c_str());
+  }
+  prefs.remove("net_count");
+}
+
+void sortSavedWifiProfiles(SavedWifiProfile profiles[], size_t count) {
+  for (size_t i = 1; i < count; ++i) {
+    SavedWifiProfile current = profiles[i];
+    size_t j = i;
+    while (j > 0 && profiles[j - 1].priority < current.priority) {
+      profiles[j] = profiles[j - 1];
+      --j;
+    }
+    profiles[j] = current;
+  }
+}
+
+void loadSavedWifiProfiles(SavedWifiProfile profiles[], size_t& count) {
+  count = 0;
+  Preferences prefs;
+  if (!prefs.begin(kWifiPrefsNamespace, true)) {
+    return;
+  }
+  const size_t stored_count = static_cast<size_t>(prefs.getUChar("net_count", 0));
+  const size_t max_count = stored_count < kMaxSavedWifiNetworks ? stored_count
+                                                               : kMaxSavedWifiNetworks;
+  for (size_t index = 0; index < max_count; ++index) {
+    const String ssid = prefs.getString(wifiProfileKey(index, "ssid").c_str(), "");
+    if (ssid.length() == 0) {
+      continue;
+    }
+    SavedWifiProfile& profile = profiles[count++];
+    profile.ssid = ssid;
+    profile.pass = prefs.getString(wifiProfileKey(index, "pass").c_str(), "");
+    profile.lat = prefs.getDouble(wifiProfileKey(index, "lat").c_str(),
+                                 config::kDefaultRadarLat);
+    profile.lon = prefs.getDouble(wifiProfileKey(index, "lon").c_str(),
+                                 config::kDefaultRadarLon);
+    profile.has_location = prefs.getBool(wifiProfileKey(index, "has_loc").c_str(), false);
+    profile.priority = prefs.getUInt(wifiProfileKey(index, "priority").c_str(), 0);
+  }
+  prefs.end();
+  sortSavedWifiProfiles(profiles, count);
+}
+
+void saveSavedWifiProfiles(const SavedWifiProfile profiles[], size_t count) {
+  Preferences prefs;
+  if (!prefs.begin(kWifiPrefsNamespace, false)) {
+    return;
+  }
+  removeSavedWifiProfileKeys(prefs);
+  prefs.putUChar("net_count", static_cast<uint8_t>(count));
+  for (size_t index = 0; index < count; ++index) {
+    const SavedWifiProfile& profile = profiles[index];
+    prefs.putString(wifiProfileKey(index, "ssid").c_str(), profile.ssid);
+    prefs.putString(wifiProfileKey(index, "pass").c_str(), profile.pass);
+    prefs.putDouble(wifiProfileKey(index, "lat").c_str(), profile.lat);
+    prefs.putDouble(wifiProfileKey(index, "lon").c_str(), profile.lon);
+    prefs.putBool(wifiProfileKey(index, "has_loc").c_str(), profile.has_location);
+    prefs.putUInt(wifiProfileKey(index, "priority").c_str(), profile.priority);
+  }
+  prefs.end();
+}
+
+void persistWifiProfile(const String& ssid, const String& pass, double lat,
+                       double lon, bool has_location, uint32_t priority) {
+  if (ssid.length() == 0) {
+    return;
+  }
+
+  SavedWifiProfile profiles[kMaxSavedWifiNetworks];
+  size_t count = 0;
+  loadSavedWifiProfiles(profiles, count);
+
+  size_t slot = count;
+  for (size_t index = 0; index < count; ++index) {
+    if (profiles[index].ssid.equalsIgnoreCase(ssid)) {
+      slot = index;
+      break;
+    }
+  }
+
+  if (slot >= count) {
+    if (count >= kMaxSavedWifiNetworks) {
+      size_t lowest_index = 0;
+      for (size_t index = 1; index < count; ++index) {
+        if (profiles[index].priority < profiles[lowest_index].priority) {
+          lowest_index = index;
+        }
+      }
+      for (size_t index = lowest_index + 1; index < count; ++index) {
+        profiles[index - 1] = profiles[index];
+      }
+      count = count > 0 ? count - 1 : 0;
+      slot = count;
+    }
+    if (count < kMaxSavedWifiNetworks) {
+      ++count;
+      slot = count - 1;
+    }
+  }
+
+  SavedWifiProfile& profile = profiles[slot];
+  profile.ssid = ssid;
+  profile.pass = pass;
+  profile.lat = lat;
+  profile.lon = lon;
+  profile.has_location = has_location;
+
+  if (priority != 0) {
+    profile.priority = priority;
+  } else {
+    uint32_t highest_priority = 0;
+    for (size_t index = 0; index < count; ++index) {
+      if (profiles[index].priority > highest_priority) {
+        highest_priority = profiles[index].priority;
+      }
+    }
+    profile.priority = highest_priority + 1;
+  }
+
+  sortSavedWifiProfiles(profiles, count);
+  saveSavedWifiProfiles(profiles, count);
+}
+
+bool applyNetworkLocationForCurrentSsid() {
+  const String ssid = WiFi.SSID();
+  if (ssid.length() == 0) {
+    return false;
+  }
+
+  SavedWifiProfile profiles[kMaxSavedWifiNetworks];
+  size_t count = 0;
+  loadSavedWifiProfiles(profiles, count);
+  for (size_t index = 0; index < count; ++index) {
+    if (profiles[index].ssid.equalsIgnoreCase(ssid) && profiles[index].has_location) {
+      services::location::set(profiles[index].lat, profiles[index].lon);
+      return true;
+    }
+  }
+  return false;
+}
+
+void markMostRecentWifiNetwork(const String& ssid) {
+  if (ssid.length() == 0) {
+    return;
+  }
+
+  SavedWifiProfile profiles[kMaxSavedWifiNetworks];
+  size_t count = 0;
+  loadSavedWifiProfiles(profiles, count);
+
+  uint32_t highest_priority = 0;
+  for (size_t index = 0; index < count; ++index) {
+    if (profiles[index].priority > highest_priority) {
+      highest_priority = profiles[index].priority;
+    }
+  }
+
+  for (size_t index = 0; index < count; ++index) {
+    if (profiles[index].ssid.equalsIgnoreCase(ssid)) {
+      profiles[index].priority = highest_priority + 1;
+      sortSavedWifiProfiles(profiles, count);
+      saveSavedWifiProfiles(profiles, count);
+      return;
+    }
+  }
+
+  persistWifiProfile(ssid, s_wm.getWiFiPass(), services::location::lat(),
+                    services::location::lon(), true, highest_priority + 1);
+}
+
+void saveCurrentWifiProfileLocation() {
+  const String ssid = (WiFi.status() == WL_CONNECTED) ? WiFi.SSID() : s_wm.getWiFiSSID();
+  const String pass = s_wm.getWiFiPass();
+  if (ssid.length() == 0) {
+    return;
+  }
+  persistWifiProfile(ssid, pass, services::location::lat(), services::location::lon(), true,
+                    0);
+}
 
 constexpr int kCoordParamLen = 20;
 constexpr char kCoordInputAttrs[] =
@@ -100,9 +306,19 @@ void refreshPortalParamDefaults() {
 }
 
 void onPortalParamsSaved() {
+  double lat = 0.0;
+  double lon = 0.0;
   if (!services::location::saveFromStrings(s_param_lat.getValue(),
                                            s_param_lon.getValue())) {
     Serial.println("Invalid lat/lon in portal — keeping previous location");
+  } else {
+    lat = services::location::lat();
+    lon = services::location::lon();
+    const String ssid = s_wm.getWiFiSSID();
+    const String pass = s_wm.getWiFiPass();
+    if (ssid.length() > 0) {
+      persistWifiProfile(ssid, pass, lat, lon, true, 0);
+    }
   }
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
@@ -156,17 +372,10 @@ bool consumeForceConfigPortal() {
 }
 
 bool storedWifiCredentials() {
-  wifi_mode_t mode = WIFI_MODE_NULL;
-  if (esp_wifi_get_mode(&mode) != ESP_OK || mode == WIFI_MODE_NULL) {
-    WiFi.mode(WIFI_STA);
-    delay(50);
-  }
-
-  wifi_config_t conf = {};
-  if (esp_wifi_get_config(WIFI_IF_STA, &conf) != ESP_OK) {
-    return false;
-  }
-  return conf.sta.ssid[0] != '\0';
+  SavedWifiProfile profiles[kMaxSavedWifiNetworks];
+  size_t count = 0;
+  loadSavedWifiProfiles(profiles, count);
+  return count > 0;
 }
 
 void eraseWifiCredentials() {
@@ -174,6 +383,12 @@ void eraseWifiCredentials() {
   WiFi.setAutoReconnect(false);
   WiFi.mode(WIFI_OFF);
   delay(100);
+
+  Preferences prefs;
+  if (prefs.begin(kWifiPrefsNamespace, false)) {
+    removeSavedWifiProfileKeys(prefs);
+    prefs.end();
+  }
 
   ensureWifiManager();
   WiFi.persistent(true);
@@ -316,17 +531,28 @@ bool tryConnectWithUi(const String& ssid, const String& pass, bool show_ui) {
 }
 
 bool connectSavedNetwork(bool show_ui) {
-  if (!storedWifiCredentials()) {
+  SavedWifiProfile profiles[kMaxSavedWifiNetworks];
+  size_t count = 0;
+  loadSavedWifiProfiles(profiles, count);
+  if (count == 0) {
     return false;
   }
 
   ensureWifiManager();
-  const String ssid = s_wm.getWiFiSSID();
-  if (ssid.length() == 0) {
-    return false;
+  for (size_t index = 0; index < count; ++index) {
+    const SavedWifiProfile& profile = profiles[index];
+    if (profile.ssid.length() == 0) {
+      continue;
+    }
+    if (tryConnectWithUi(profile.ssid, profile.pass, show_ui)) {
+      if (applyNetworkLocationForCurrentSsid()) {
+        Serial.printf("Applied saved location for %s\n", WiFi.SSID().c_str());
+      }
+      markMostRecentWifiNetwork(WiFi.SSID());
+      return true;
+    }
   }
-  const String pass = s_wm.getWiFiPass();
-  return tryConnectWithUi(ssid, pass, show_ui);
+  return false;
 }
 
 bool openConfigPortal() {
