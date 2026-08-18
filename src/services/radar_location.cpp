@@ -78,6 +78,14 @@ bool saveFromStrings(const char* lat_str, const char* lon_str) {
   return true;
 }
 
+void set(double lat, double lon) {
+  if (!validLatLon(lat, lon)) {
+    return;
+  }
+  persist(lat, lon);
+  Serial.printf("Radar location set: %.6f, %.6f\n", lat, lon);
+}
+
 void clear() {
   Preferences prefs;
   prefs.begin(kPrefsNamespace, false);
